@@ -3,16 +3,18 @@ import Gibby
 import CartKit
 
 class ProductInfoViewController: ContextViewController {
-    @IBOutlet weak var firmwareTextField: NSTextField!
-    @IBOutlet weak var voltageTextField: NSTextField!
-    @IBOutlet weak var websiteTextField: NSTextField!
+    @IBOutlet weak var firmwareTextField :NSTextField!
+    @IBOutlet weak var voltageTextField  :NSTextField!
+    @IBOutlet weak var websiteTextField  :NSTextField!
     
-    override func awakeFromNib() {
-        super.awakeFromNib()
-        
-        if let appDelegate = NSApp.delegate as? AppDelegate {
-            appDelegate.productInfoController = self
+    override func prepare(for segue: NSStoryboardSegue, sender: Any?) {
+        super.prepare(for: segue, sender: sender)
+        guard let contentViewController = segue.destinationController as? GBxCartViewController
+            , let appDelegate           = NSApp.delegate as? AppDelegate
+            else {
+                fatalError()
         }
+        contentViewController.setup(with: appDelegate, inside: self)
     }
     
     override func viewDidLoad() {
@@ -32,16 +34,29 @@ class ProductInfoViewController: ContextViewController {
         }
     }
     
+    @IBAction func clearProductInfo(_ sender: Any?) {
+        DispatchQueue.global().async {
+            try! self.updateProductInfoResult().get()
+        }
+    }
+    
     @IBAction func readProductInfo(_ sender: Any?) {
-        insideGadgetsController.perform { controller in
-            switch controller
-                .flatMap({ controller in .success(Voltage.high) /* controller.voltage() */ })
-                .flatMap({ self.updateProductInfoResult(voltage: $0.rawValue, website: "www.insideGadgets.com") })
-            {
-            case .success: ()
+        GBxCart.open { serialDevice in
+            switch serialDevice
+                .readVoltage()
+                .flatMap({ voltage in
+                    serialDevice.readPCBVersion().map { (voltage, $0) }
+                }) {
+            case .success(let voltage?, let version):
+                try? self.updateProductInfoResult(
+                    firmware :"\(version)",
+                    voltage  :voltage.debugDescription,
+                    website  :"insideGadgets.com"
+                ).get()
             case .failure(let error):
                 self.context.display(error: error, in: self)
-                try! self.updateProductInfoResult().get()
+                self.clearProductInfo(nil)
+            default: ()
             }
         }
     }

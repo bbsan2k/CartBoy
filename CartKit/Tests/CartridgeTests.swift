@@ -3,127 +3,179 @@ import ORSSerial
 import Gibby
 import CartKit
 
-extension Cartridge {
-    fileprivate var md5String: String {
-        return Data(self[0..<self.endIndex]).md5.hexString(separator: "").lowercased()
-    }
-}
-
-fileprivate func saveFileAndMD5(named title: String, extension fileExtension: String = "sav") throws -> (data: Data, md5: String) {
-    let data = try Data(contentsOf: URL(fileURLWithPath: "/Users/kevin/Desktop/\(title).\(fileExtension)"))
-    let MD5 = data.md5.hexString(separator: "").lowercased()
-    return (data, MD5)
-}
-
-fileprivate func romFileURL(named title: String, extension fileExtension: String = "gb") -> URL {
-    return URL(fileURLWithPath: "/Users/kevin/Desktop/\(title).\(fileExtension)")
-}
-
 class CartridgeTests: XCTestCase {
-    func testHeader() {
+    func testSessionReadAdvanceHeader() {
         let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller.flatMap({ $0.header(for: GameboyClassic.self) }) {
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice.readHeader(forPlatform: GameboyAdvance.self) {
             case .success(let header): print(header)
             case .failure(let error):  XCTFail("\(error)")
             }
-        }
-        waitForExpectations(timeout: 5)
-    }
-    
-    func testCartridge() {
-        let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller
-                .flatMap({ $0.cartridge(for: GameboyClassic.self, progress: { print($0) }) })
-            {
-            case .success(let cartridge): print(cartridge.header); print(cartridge.md5String)
-            case .failure(let error):  XCTFail("\(error)")
-            }
+            exp.fulfill()
         }
         waitForExpectations(timeout: 20)
     }
     
-    func testBackupSave() {
+    func testSessionReadClassicHeader() {
         let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller.flatMap({ $0.backupSave(for: GameboyClassic.self, progress: { print($0) }) }) {
-            case .success(let saveData): print(saveData)
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice.readHeader(forPlatform: GameboyClassic.self) {
+            case .success(let header): print(header)
             case .failure(let error):  XCTFail("\(error)")
             }
+            exp.fulfill()
         }
         waitForExpectations(timeout: 20)
     }
     
-    func testRestoreSave() {
+    @available(OSX 10.15, *)
+    func testSessionReadClassicCartridge() {
         let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller
-                .flatMap({ controller in Result { (controller, try saveFileAndMD5(named: "POKEMON YELLOW")) } })
-                .flatMap({ $0.restoreSave(for: GameboyClassic.self, data: $1.data, progress: { print($0) }) })
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice
+                .readClassicCartridge (progress: { print($0.fractionCompleted) })
+                .write                (toDirectoryPath: "/Users/kevin/Desktop")
+                .check                (MD5: "b259feb41811c7e4e1dc20167985c84") /* Super Mario Land? */
             {
-            case .success: ()
+            case .success(let cartridge): print(cartridge)
             case .failure(let error):  XCTFail("\(error)")
             }
-        }
-        waitForExpectations(timeout: 5)
-    }
-    
-    func testDeleteSave() {
-        let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller.flatMap({ $0.deleteSave(for: GameboyClassic.self, progress: { print($0) })})
-            {
-            case .success: ()
-            case .failure(let error):  XCTFail("\(error)")
-            }
-        }
-        waitForExpectations(timeout: 5)
-    }
-    
-    func testVoltage() {
-        let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller.flatMap({ $0.voltage() })
-            {
-            case .success(let voltage): print(voltage)
-            case .failure(let error):  XCTFail("\(error)")
-            }
-        }
-        waitForExpectations(timeout: 5)
-    }
-    
-    func testWriteResult() {
-        let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller
-                .map({ controller in (controller, "POKEMON YELLOW") })
-                .flatMap({ (controller, fileName) in Result { (controller, try AM29F016B(contentsOf: romFileURL(named: fileName))) } })
-                .flatMap({ (controller, flashCartridge) in controller.write(to: flashCartridge, progress: { print($0) }) })
-            {
-            case .success: ()
-            case .failure(let error):  XCTFail("\(error)")
-            }
+
+            exp.fulfill()
         }
         waitForExpectations(timeout: 300)
     }
     
-    func testCartridgeEraser() {
+    func testSessionReadClassicSaveFile() {
         let exp = expectation(description: "")
-        insideGadgetsController.perform { controller in
-            defer { exp.fulfill() }
-            switch controller.flatMap({ $0.erase(chipset: AM29F016B.self) }) {
-            case .success: ()
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice
+                .readClassicSaveData (progress: { print($0.fractionCompleted) })
+                .write               (toDirectoryPath: "/Users/kevin/Desktop",
+                                             fileName: "POKEMON RED.sav")
+            {
+            case .success(let saveData): print(saveData)
             case .failure(let error):  XCTFail("\(error)")
             }
+            
+            exp.fulfill()
         }
-        waitForExpectations(timeout: 20)
+        waitForExpectations(timeout: 300)
+    }
+    
+    @available(OSX 10.15, *)
+    func testSessionRestoreClassicSaveFile() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch Result(catching: {
+                try Data(contentsOf: URL(fileURLWithPath: "/Users/kevin/Desktop/POKEMON YELLOW.sav"))
+            })
+            .flatMap({
+                serialDevice
+                    .restoreClassicSaveData($0, progress: { print($0.fractionCompleted) })
+                    .readClassicSaveData       (progress: { print($0.fractionCompleted) })
+                    .map { $0.md5 ?? .init() }
+            })
+            {
+            case .success(let results) :print(results.hexString(separator: ""))
+            case .failure(let error)   :XCTFail("\(error)")
+            }
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
+    }
+    
+    @available(OSX 10.15, *)
+    func testSessionDeleteClassicSaveFile() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice
+                .deleteClassicSaveData(progress: { print($0.fractionCompleted) })
+                .readClassicSaveData  (progress: { print($0.fractionCompleted) })
+                .map({ $0.md5 ?? .init() })
+            {
+            case .success(let results) :print(results.hexString(separator: ""))
+            case .failure(let error)   :XCTFail("\(error)")
+            }
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
+    }
+    
+    func testSessionEraseClassicFlashCartridge() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice
+                .erase(flashCartridge: AM29F016B.self)
+                .readHeader(forPlatform: GameboyClassic.self)
+            {
+            case .success(let header) :print(header)
+            case .failure(let error)  :XCTFail("\(error)")
+            }
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
+    }
+    
+    func testSessionClassicFlashCartridge() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            let openFile = Result {
+                try FlashCartridge<AM29F016B>(filePath: "/Users/kevin/Desktop/POKEMON_SLV.gbc")
+            }
+            switch openFile
+                .flatMap({ cartridge in
+                    serialDevice
+                        .erase(flashCartridge: AM29F016B.self)
+                        .flash(cartridge: cartridge, progress: { print($0.fractionCompleted) })
+                })
+                .readHeader(forPlatform: GameboyClassic.self)
+            {
+            case .success(let header) :print(header)
+            case .failure(let error)  :XCTFail("\(error)")
+            }
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
+    }
+    
+    
+    func testDetectFlashCartridge() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            ChipsetFlashProgram.allFlashPrograms.forEach {
+                switch serialDevice.detectFlashID(using: $0) {
+                case .success(let flashID) :print("\($0): \(flashID)")
+                case .failure(let error)   :XCTFail("\(error)")
+                }
+            }
+            
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
+    }
+    
+    func testDetectCartridgeMode() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice.readCartridgeMode() {
+            case .success(let mode)  :print(mode)
+            case .failure(let error) :XCTFail("\(error)")
+            }
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
+    }
+    
+    func testDetectPCBVersion() {
+        let exp = expectation(description: "")
+        SerialDeviceSession<GBxCart>.open { serialDevice in
+            switch serialDevice.readPCBVersion() {
+            case .success(let version) :print(version)
+            case .failure(let error)   :XCTFail("\(error)")
+            }
+            exp.fulfill()
+        }
+        waitForExpectations(timeout: 300)
     }
 }

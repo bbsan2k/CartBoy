@@ -16,6 +16,11 @@ import ORSSerial
  - SeeAlso: ThreadSafeSerialPortController
  */
 class OpenPortOperation<Controller: SerialPortController>: Operation, ORSSerialPortDelegate {
+    /**
+     Create an `Operation` which will open a `controller`.
+     
+     - parameter controller: The controller to open.
+     */
     init(controller: Controller) {
         self.controller = controller
         super.init()
@@ -80,7 +85,9 @@ class OpenPortOperation<Controller: SerialPortController>: Operation, ORSSerialP
     
     @objc override func start() {
         if self.isAsynchronous {
-            Thread(target: self, selector: #selector(self.main), object: nil).start()
+            OpenDispatchQueue.async {
+                self.main()
+            }
         }
         else {
             main()
@@ -94,15 +101,23 @@ class OpenPortOperation<Controller: SerialPortController>: Operation, ORSSerialP
      `super.main()` returns, the port is open and under its exclusive control.
      */
     @objc override func main() {
-        defer { self._isExecuting = true }
+        // 0. Set initial state...
         self._isReady = false
+        
+        // 1. Attempt to open the port...
         self.controller.openReader(delegate: self)
+        
         self.isReadyCondition.whileLocked {
+            // 2. Block execution here, and wait for the port to open.
             while !self.isReady {
                 self.isReadyCondition.wait()
             }
+            // ...then continue...
             super.main()
         }
+        
+        // 3. Subclasses are free to perform calls to the port.
+        self._isExecuting = true
     }
 
     func serialPortWasRemovedFromSystem(_ serialPort: ORSSerialPort) {
@@ -117,9 +132,14 @@ class OpenPortOperation<Controller: SerialPortController>: Operation, ORSSerialP
     }
 
     @objc func serialPortWasClosed(_ serialPort: ORSSerialPort) {
-        controller.close(delegate: self)
+        controller.serialPortWasClosed()
     }
     
     @objc func serialPort(_ serialPort: ORSSerialPort, didReceive data: Data) {
     }
 }
+
+let OpenDispatchQueue = DispatchQueue(label: "com.cartkit.serialport.open.queue",
+                                      qos: .userInteractive,
+                                      attributes: .concurrent)
+

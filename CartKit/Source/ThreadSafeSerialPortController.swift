@@ -1,18 +1,26 @@
 import Foundation
 import ORSSerial
 
+/**
+ A controller that blocks access to a serial port (described by `portProfile`)
+ while opened.
+ */
 open class ThreadSafeSerialPortController: NSObject, SerialPortController {
     /**
+     Creates an instance of the receiver **iff** the serial port described by
+     `portProfile` is connected to system.
+     
+     - parameter portProfile: Describes the serial port to be controlled.
      */
     init(matching portProfile: ORSSerialPortManager.PortProfile) throws {
         self.reader = try ORSSerialPortManager.port(matching: portProfile)
         super.init()
     }
     
-    ///
+    /// The underlying serial port.
     fileprivate let reader: ORSSerialPort
     
-    ///
+    /// A lock & checkpoint for whether the `reader` is opened by the receiver.
     private let isOpenCondition = NSCondition()
     
     /// Retain a strong reference. Prevents _deinit_ of `reader.delegate`.
@@ -50,7 +58,7 @@ open class ThreadSafeSerialPortController: NSObject, SerialPortController {
     /**
      */
     @discardableResult
-    func send(_ data: Data?, timeout: UInt32? = nil) -> Bool {
+    public func send(_ data: Data?, timeout: UInt32? = nil) -> Bool {
         defer {
             if let timeout = timeout {
                 usleep(timeout)
@@ -59,21 +67,15 @@ open class ThreadSafeSerialPortController: NSObject, SerialPortController {
         guard let data = data else {
             return false
         }
-        /*
+        // log(data)
+        return self.reader.send(data)
+    }
+
+    private func log(_ data: Data) {
         if data != Data([0x31]) {
             print(#function, data.hexString(), String(data: data, encoding: .ascii)!)
         }
-         */
-        return self.reader.send(data)
     }
-    
-    @discardableResult
-    func send<Number>(_ command: String, number: Number, radix: Int = 16, terminate: Bool = true, timeout: UInt32? = nil) -> Bool where Number : FixedWidthInteger {
-        let numberAsString = String(number, radix: radix, uppercase: true)
-        let data = ("\(command)\(numberAsString)" + (terminate ? "\0" : "")).data(using: .ascii)!
-        return self.send(data, timeout: timeout)
-    }
-    
 }
 
 extension ThreadSafeSerialPortController {
@@ -89,10 +91,12 @@ extension ThreadSafeSerialPortController {
         return self.reader.close()
     }
     
-    public func close(delegate: ORSSerialPortDelegate) {
+    public func serialPortWasClosed() {
         self.isOpenCondition.whileLocked {
             self.delegate = nil
             self.isOpenCondition.signal()
         }
     }
 }
+
+let TerminatingResponse: ORSSerialPacketEvaluator = { $0!.starts(with: [0x31]) }
